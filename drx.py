@@ -19,7 +19,8 @@ else:
 bot = telebot.TeleBot(config['token'])
 bot.remove_webhook()
 # NEW (use environment variable):
-API_URL = os.environ.get('API_URL', 'http://127.0.0.1:8080/hit')
+# This tries environment variable first, then falls back to hardcoded URL
+API_URL = os.environ.get('API_URL', 'https://drx-api-x40n.onrender.com/hit')
 AUTH_TOKEN = "DRX_POWER_ULTRA_V4"
 
 # Database files
