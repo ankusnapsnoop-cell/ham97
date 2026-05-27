@@ -6,6 +6,20 @@ app = Flask(__name__)
 
 # - Security Key taaki koi aur tumhari API use na kar sake
 API_AUTH_TOKEN = "DRX_POWER_ULTRA_V4"
+# ============================================
+# ADD THIS - HOMEPAGE (Shows when you visit link)
+# ============================================
+@app.route('/')
+def home():
+    return jsonify({
+        "status": "API is LIVE ✅",
+        "message": "DRX Power System is running",
+        "endpoints": {
+            "/": "This homepage",
+            "/hit": "Attack endpoint - use with ?token=DRX_POWER_ULTRA_V4&ip=IP&port=PORT&time=TIME"
+        },
+        "status_check": "API is ready to receive attack commands"
+    })
 
 @app.route('/hit', methods=['GET'])
 def start_attack():
